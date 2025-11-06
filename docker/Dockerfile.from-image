@@ -6,9 +6,10 @@ ARG BASE_IMAGE=dcgm-fake-gpu-exporter:latest
 FROM ${BASE_IMAGE}
 
 # Update Python scripts with new profile support
-COPY dcgm_fake_manager.py /usr/local/bin/dcgm_fake_manager.py
-COPY dcgm_exporter.py /root/Workspace/DCGM/_out/Linux-amd64-debug/dcgm_exporter.py
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY src/dcgm_fake_manager.py /usr/local/bin/dcgm_fake_manager.py
+COPY src/dcgm_exporter.py /root/Workspace/DCGM/_out/Linux-amd64-debug/dcgm_exporter.py
+COPY src/dcgm_uds_server.py /root/Workspace/DCGM/_out/Linux-amd64-debug/dcgm_uds_server.py
+COPY src/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # Ensure executable permissions
 RUN chmod +x /usr/local/bin/dcgm_fake_manager.py \

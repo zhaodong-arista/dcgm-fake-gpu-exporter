@@ -11,31 +11,35 @@ help: ## Show this help message
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
 
-build: ## Build Docker image
+build: ## Build Docker image (optimized)
+	@echo "Building Docker image..."
+	./scripts/build-optimized.sh
+
+build-full: ## Build Docker image (full DCGM)
 	@echo "Building Docker image..."
 	@if [ ! -d "$(DCGM_DIR)" ]; then \
 		echo "Error: DCGM_DIR not found: $(DCGM_DIR)"; \
 		echo "Please set DCGM_DIR or build DCGM first"; \
 		exit 1; \
 	fi
-	./build.sh
+	./scripts/build.sh
 
 up: ## Start containers
-	docker-compose up -d
+	cd deployments && docker-compose up -d
 
 down: ## Stop containers
-	docker-compose down
+	cd deployments && docker-compose down
 
 restart: down up ## Restart containers
 
 logs: ## View container logs
-	docker-compose logs -f dcgm-exporter
+	cd deployments && docker-compose logs -f dcgm-exporter
 
 logs-all: ## View all container logs
-	docker-compose logs -f
+	cd deployments && docker-compose logs -f
 
 ps: ## Show running containers
-	docker-compose ps
+	cd deployments && docker-compose ps
 
 test: ## Test the exporter
 	@echo "Testing DCGM exporter..."

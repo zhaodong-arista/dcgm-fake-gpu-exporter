@@ -6,10 +6,35 @@
 
 A powerful Prometheus exporter that simulates realistic NVIDIA GPU behavior using DCGM's injection framework. Test GPU monitoring, dashboards, and alerting systems **without expensive hardware** - from single GPUs to entire data center clusters.
 
+---
+
+## 📋 Table of Contents
+
+- [Why This Tool?](#-why-this-tool)
+- [Features](#-features)
+- [High-Level Architecture](#️-high-level-architecture)
+- [Quick Start](#-quick-start)
+- **[Consuming the Exporter](#-consuming-the-exporter-main-use-case)** ⭐ **Main Use Case**
+  - [HTTP/REST API](#-option-1-httprest-api-default---recommended)
+  - [Unix Domain Socket](#-option-2-unix-domain-socket-optional---low-latency)
+- [Building from Source](#️-building-from-source-for-contributors)
+- [Configuration](#-configuration)
+- [Available Metrics](#-available-metrics)
+- [Integration Examples](#-integration-examples)
+- [Architecture Details](#️-architecture)
+- [Migration to Production](#-migration-to-production)
+- [Troubleshooting](#-troubleshooting)
+- [Testing](#-testing)
+- [Repository Structure](#-repository-structure)
+- [Documentation](#-documentation)
+- [Contributing](#-contributing)
+
+---
+
 ## 🎯 Why This Tool?
 
 - **💰 Save Costs**: No need for expensive GPU instances during development
-- **🧪 Test at Scale**: Simulate 1 to 1000+ GPUs instantly
+- **🧪 Test at Scale**: Simulate 1 to 16 GPUs (DCGM limit) with realistic behavior
 - **🎭 Realistic Scenarios**: 7 behavior profiles from stable workloads to chaos engineering
 - **⚡ Quick Setup**: One command to get running - no 10+ hour DCGM builds
 - **🔄 Production-Ready**: Compatible with real DCGM metrics for seamless migration
@@ -28,88 +53,317 @@ A powerful Prometheus exporter that simulates realistic NVIDIA GPU behavior usin
 - 📐 **Scalable** - Test with 1 to 1000+ GPUs
 - 🎛️ **Per-GPU Control** - Different behavior profiles for each GPU
 
+## 🏗️ High-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Your Monitoring Stack                            │
+│                                                                         │
+│  ┌──────────┐      ┌─────────────┐      ┌──────────────┐                │
+│  │ Grafana  │◀────▶│ Prometheus  │◀────▶│ Custom Apps  │                │
+│  │          │      │             │      │              │                │
+│  └──────────┘      └──────┬──────┘      └──────┬───────┘                │
+│                           │                     │                       │
+│                           │ HTTP :9400          │ UDS (optional)        │
+│                           │ /metrics            │ Socket                │
+└───────────────────────────┼─────────────────────┼──────────────────────-┘
+                            │                     │
+                            ▼                     ▼
+        ┌────────────────────────────────────────────────────────┐
+        │        DCGM Fake GPU Exporter Container                │
+        │                                                        │
+        │  ┌──────────────┐              ┌──────────────┐        │
+        │  │ HTTP Server  │              │  UDS Server  │        │
+        │  │   :9400      │              │  (optional)  │        │
+        │  └──────┬───────┘              └──────┬───────┘        │
+        │         │                             │                │
+        │         └─────────────┬───────────────┘                │
+        │                       ▼                                │
+        │         ┌──────────────────────────┐                   │
+        │         │   DCGM + Fake GPUs       │                   │
+        │         │                          │                   │
+        │         │  GPU1  GPU2  GPU3  GPU4  │                   │
+        │         │  [📊]  [📊]  [📊]  [📊]   │                   │
+        │         │                          │                   │
+        │         │  Profiles: wave, spike,  │                   │
+        │         │  stable, degrading, etc. │                   │
+        │         └──────────────────────────┘                   │
+        └────────────────────────────────────────────────────────┘
+```
+
+**Two Ways to Consume Metrics:**
+- 🌐 **HTTP (Default)**: Standard Prometheus scraping on port 9400
+- 🔌 **UDS (Optional)**: Unix Domain Socket for local, low-latency access
+
 ## 🚀 Quick Start
 
 ### Prerequisites
 
 - Docker and Docker Compose
 - x86-64 Linux host (or ARM Mac with Rosetta 2)
-- **Pre-built DCGM binaries** (see [Building DCGM Binaries](#building-dcgm-binaries-optional))
 
-### Option 1: Using Pre-built Docker Image (Recommended)
+### 🎨 Visual Demo (Recommended)
 
-Pull the pre-built image from GitHub Container Registry:
+**See the profiles in action with Grafana!**
 
 ```bash
+# Start full stack: DCGM Exporter + Prometheus + Grafana
+cd deployments
+docker-compose -f docker-compose-demo.yml up -d
+
+# Wait 30 seconds, then open Grafana
+open http://localhost:3000
+# Login: admin/admin
+```
+
+**Features beautiful dashboards showing:**
+- 4 GPUs with different profiles (wave, spike, stable, degrading)
+- Real-time graphs updating every 5 seconds
+- Gauges, time series, and heatmaps
+- **8 pre-configured alert rules** (spike detection, high temp, degrading performance, etc.)
+- Perfect for demos and presentations!
+
+📖 **[See GRAFANA_DEMO.md](GRAFANA_DEMO.md) for detailed guide and screenshots**
+
+---
+
+## 📡 Consuming the Exporter (Main Use Case)
+
+> **This is the primary use case** - consume GPU metrics from the exporter in your monitoring stack.
+
+The exporter provides two interfaces for consuming metrics:
+
+### 🌐 Option 1: HTTP/REST API (Default - Recommended)
+
+**Standard Prometheus scraping** - Works everywhere, no special setup needed.
+
+#### Basic Usage
+
+```bash
+# Start the exporter
 docker run -d \
-  --name dcgm-exporter \
+  --name dcgm-fake-gpu-exporter \
   -p 9400:9400 \
-  -p 5555:5555 \
   -e NUM_FAKE_GPUS=4 \
   ghcr.io/saiakhil2012/dcgm-fake-gpu-exporter:latest
 
-# View metrics
+# Consume metrics via HTTP
 curl http://localhost:9400/metrics
 ```
 
-### Option 2: Building from Source
+#### With Prometheus (docker-compose)
 
-**Two build methods available:**
+```yaml
+# docker-compose.yml
+services:
+  dcgm-exporter:
+    image: ghcr.io/saiakhil2012/dcgm-fake-gpu-exporter:latest
+    ports:
+      - "9400:9400"
+    environment:
+      - NUM_FAKE_GPUS=4
+      - METRIC_PROFILE=stable
+    restart: unless-stopped
 
-#### Method A: From Existing Image (Recommended for Dev Machines)
-If you have a previous version of the image but not the DCGM binaries:
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+```
+
+**prometheus.yml:**
+```yaml
+scrape_configs:
+  - job_name: 'dcgm'
+    static_configs:
+      - targets: ['dcgm-exporter:9400']
+    scrape_interval: 10s
+```
+
+#### With Python
+
+```python
+import requests
+
+# Fetch metrics
+response = requests.get('http://localhost:9400/metrics')
+metrics = response.text
+
+# Parse and use
+for line in metrics.split('\n'):
+    if 'dcgm_gpu_temp' in line and not line.startswith('#'):
+        print(line)
+```
+
+#### With Grafana
+
+```promql
+# Query GPU temperatures
+dcgm_gpu_temp{gpu!="0"}
+
+# GPU utilization
+dcgm_gpu_utilization{gpu!="0"}
+
+# Power usage (convert mW to W)
+dcgm_power_usage{gpu!="0"} / 1000
+```
+
+---
+
+### 🔌 Option 2: Unix Domain Socket (Optional - Low Latency)
+
+**For local, high-performance metric collection** - Lower latency, no network overhead.
+
+#### Basic Usage
+
+```bash
+# Start exporter with UDS enabled
+docker run -d \
+  --name dcgm-fake-gpu-exporter \
+  -p 9400:9400 \
+  -v /tmp/dcgm-metrics:/var/run/dcgm \
+  -e NUM_FAKE_GPUS=4 \
+  -e ENABLE_UDS=true \
+  ghcr.io/saiakhil2012/dcgm-fake-gpu-exporter:latest
+
+# Consume via UDS (Python example)
+import socket
+
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.connect('/tmp/dcgm-metrics/metrics.sock')
+sock.sendall(b'GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n')
+response = sock.recv(65536)
+print(response.decode('utf-8'))
+sock.close()
+```
+
+#### With docker-compose
+
+```yaml
+# docker-compose.yml
+services:
+  # Exporter with UDS enabled
+  dcgm-exporter:
+    image: ghcr.io/saiakhil2012/dcgm-fake-gpu-exporter:latest
+    volumes:
+      - /tmp/dcgm-metrics:/var/run/dcgm
+    environment:
+      - NUM_FAKE_GPUS=4
+      - ENABLE_UDS=true  # 🔥 Enable UDS
+    restart: unless-stopped
+
+  # Your consumer application
+  my-app:
+    image: my-monitoring-app:latest
+    volumes:
+      - /tmp/dcgm-metrics:/var/run/dcgm  # Share socket
+    environment:
+      - DCGM_SOCKET=/var/run/dcgm/metrics.sock
+```
+
+#### With Go
+
+```go
+package main
+
+import (
+    "fmt"
+    "net"
+    "net/http"
+)
+
+func main() {
+    // Connect to UDS
+    conn, _ := net.Dial("unix", "/tmp/dcgm-metrics/metrics.sock")
+    defer conn.Close()
+    
+    // Send HTTP request
+    fmt.Fprintf(conn, "GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n")
+    
+    // Read response
+    buf := make([]byte, 65536)
+    n, _ := conn.Read(buf)
+    fmt.Println(string(buf[:n]))
+}
+```
+
+**Benefits of UDS:**
+- ⚡ Lower latency (no TCP/IP stack)
+- 🔒 File system permissions (secure)
+- 🚫 No port conflicts
+- 📊 Works alongside HTTP (both enabled simultaneously)
+
+📖 **[Complete UDS Guide](docs/UDS_SUPPORT.md)** - Configuration, examples, troubleshooting
+
+---
+
+## 🛠️ Building from Source (For Contributors)
+
+> **Most users don't need to build** - use the pre-built image above. Build only if contributing or customizing.
+
+### Pull Pre-Built Image
+
+```bash
+docker pull ghcr.io/saiakhil2012/dcgm-fake-gpu-exporter:latest
+
+# Run it
+docker run -d -p 9400:9400 \
+  -e NUM_FAKE_GPUS=4 \
+  ghcr.io/saiakhil2012/dcgm-fake-gpu-exporter:latest
+```
+
+### Build from Source
+
+**ONE unified build script** with multiple build methods:
 
 ```bash
 # Clone the repository
 git clone https://github.com/saiakhil2012/dcgm-fake-gpu-exporter.git
 cd dcgm-fake-gpu-exporter
 
-# Smart build (auto-detects best method)
-./build-smart.sh
+# Auto-detect best build method (recommended)
+./scripts/build.sh
 
-# Or explicitly from existing image
-./build-smart.sh --from-image
+# Or specify a method:
+./scripts/build.sh optimized        # From tar file (recommended)
+./scripts/build.sh from-image       # From existing Docker image
+./scripts/build.sh from-binaries    # From DCGM binaries
 
-# Run
+# With custom tag:
+./scripts/build.sh optimized -t v2.0
+
+# Get help:
+./scripts/build.sh --help
+```
+
+**Build Methods:**
+
+| Method | When to Use | Requirements | Build Time |
+|--------|-------------|--------------|------------|
+| **auto** | Let the script decide (default) | Any source available | Varies |
+| **from-image** | ⭐ Fastest dev iterations | Existing Docker image | ~30 sec |
+| **optimized** | First-time or full rebuild | `artifacts/DCGM_subset.tar.gz` | ~2 min |
+| **from-binaries** | Custom DCGM builds | DCGM binaries at `$DCGM_DIR` | ~3 min |
+
+**Priority:** The auto-detect will use: existing image > tar file > binaries (fastest to slowest)
+
+**After building:**
+```bash
+# Run the newly built image
 docker run -d -p 9400:9400 dcgm-fake-gpu-exporter:latest
-```
 
-**Benefits:**
-- ✅ No DCGM binaries needed
-- ✅ Fast build (10-30 seconds)
-- ✅ Perfect for updating code on new machines
-- ✅ Ideal for development iterations
-
-#### Method B: From DCGM Binaries (Initial Setup)
-If you have DCGM binaries or building for the first time:
-
-```bash
-# Clone the repository
-git clone https://github.com/saiakhil2012/dcgm-fake-gpu-exporter.git
-cd dcgm-fake-gpu-exporter
-
-# You need DCGM binaries - see "Building DCGM Binaries" section below
-# Place your DCGM build at: ~/Workspace/DCGM/_out/Linux-amd64-debug/
-
-# Build and run
-./build-smart.sh --from-binaries
-# Or use legacy script
-./build.sh
-
-# Or use Docker Compose
-docker-compose up -d
+# Or with docker-compose
+cd deployments && docker-compose up -d
 
 # View metrics
 curl http://localhost:9400/metrics
 ```
 
-**Benefits:**
-- ✅ Complete build from scratch
-- ✅ Reproducible builds
-- ✅ Creates base image for other machines
-- ✅ Suitable for CI/CD pipelines
-
-📚 **[See detailed build methods guide](docs/BUILD_METHODS.md)** for choosing the right method.
+📚 **[See BUILDING_DCGM.md](docs/BUILDING_DCGM.md)** for obtaining DCGM binaries (if needed).
 
 ## 📊 Available Metrics
 
@@ -131,12 +385,14 @@ curl http://localhost:9400/metrics
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NUM_FAKE_GPUS` | `4` | Number of fake GPUs to create (1-1000+) |
+| `NUM_FAKE_GPUS` | `4` | Number of fake GPUs to create (1-16, DCGM limit) |
 | `METRIC_PROFILE` | `static` | Metric behavior profile (see profiles below) |
 | `GPU_PROFILES` | - | Comma-separated profiles per GPU (overrides METRIC_PROFILE) |
 | `METRIC_UPDATE_INTERVAL` | `30` | Seconds between metric updates |
 | `GPU_START_INDEX` | `1` | Starting GPU index (for cluster simulation) |
 | `EXPORTER_PORT` | `9400` | Prometheus metrics port |
+| `ENABLE_UDS` | `false` | Enable Unix Domain Socket server (`true`/`false`) |
+| `UDS_SOCKET_PATH` | `/var/run/dcgm/metrics.sock` | Path to UDS socket (inside container) |
 | `DCGM_DIR` | `/root/Workspace/DCGM/_out/Linux-amd64-debug` | Path to DCGM binaries in container |
 
 ### Metric Profiles
@@ -173,10 +429,10 @@ docker run -d -p 9400:9400 \
   dcgm-fake-gpu-exporter
 ```
 
-**Large-scale testing (100 GPUs):**
+**Large-scale testing (16 GPUs - DCGM max):**
 ```bash
 docker run -d -p 9400:9400 \
-  -e NUM_FAKE_GPUS=100 \
+  -e NUM_FAKE_GPUS=16 \
   -e METRIC_PROFILE=wave \
   dcgm-fake-gpu-exporter
 ```
@@ -184,24 +440,38 @@ docker run -d -p 9400:9400 \
 **Fast updates for testing:**
 ```bash
 docker run -d -p 9400:9400 \
-  -e METRIC_UPDATE_INTERVAL=10 \
-  -e METRIC_PROFILE=chaos \
+  -e METRIC_UPDATE_INTERVAL=3 \
+  -e METRIC_PROFILE=wave \
   dcgm-fake-gpu-exporter
 ```
 
-**Cluster simulation (multiple nodes):**
+**Demo mode (visible changes every 2 seconds):**
 ```bash
-# Node 1: GPUs 1-8
+docker run -d -p 9400:9400 \
+  -e NUM_FAKE_GPUS=4 \
+  -e METRIC_PROFILE=wave \
+  -e METRIC_UPDATE_INTERVAL=2 \
+  dcgm-fake-gpu-exporter
+
+# Watch it change in real-time
+watch -n 2 'curl -s http://localhost:9400/metrics | grep dcgm_gpu_temp'
+```
+
+**Cluster simulation (multiple containers for >16 GPUs):**
+```bash
+# Container 1: GPUs 1-16
 docker run -d -p 9401:9400 \
-  -e NUM_FAKE_GPUS=8 \
+  -e NUM_FAKE_GPUS=16 \
   -e GPU_START_INDEX=1 \
   dcgm-fake-gpu-exporter
 
-# Node 2: GPUs 9-16
+# Container 2: GPUs 17-32
 docker run -d -p 9402:9400 \
-  -e NUM_FAKE_GPUS=8 \
-  -e GPU_START_INDEX=9 \
+  -e NUM_FAKE_GPUS=16 \
+  -e GPU_START_INDEX=17 \
   dcgm-fake-gpu-exporter
+
+# This way you can simulate 100+ GPUs across multiple containers
 ```
 
 **Custom port:**
@@ -210,6 +480,51 @@ docker run -d -p 9401:9400 dcgm-fake-gpu-exporter
 ```
 
 ## 📈 Integration Examples
+
+### Consuming Metrics via HTTP (Default)
+
+```bash
+# Prometheus
+curl http://localhost:9400/metrics
+
+# Python
+import requests
+metrics = requests.get('http://localhost:9400/metrics').text
+```
+
+### Consuming Metrics via Unix Domain Socket (Built-in!)
+
+**Native UDS support** - no extra containers needed! Just set `ENABLE_UDS=true`:
+
+```yaml
+services:
+  dcgm-exporter:
+    image: ghcr.io/saiakhil2012/dcgm-fake-gpu-exporter:latest
+    volumes:
+      - /tmp/dcgm-metrics:/var/run/dcgm
+    environment:
+      - NUM_FAKE_GPUS=4
+      - ENABLE_UDS=true  # 🔥 Enable UDS support
+```
+
+**Consumer reads from UDS:**
+```python
+import socket
+
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.connect('/tmp/dcgm-metrics/metrics.sock')
+sock.sendall(b'GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n')
+response = sock.recv(65536)
+print(response.decode('utf-8'))
+```
+
+✅ **Works on macOS M2, Linux, and Ubuntu!**  
+✅ **No extra containers** - UDS built into the exporter  
+✅ **Zero friction** for consumers
+
+📖 **[Complete UDS guide](docs/UDS_SUPPORT.md)** - Configuration, examples, troubleshooting
+
+---
 
 ### Prometheus
 
@@ -226,6 +541,7 @@ scrape_configs:
 Or use the included docker-compose with Prometheus:
 
 ```bash
+cd deployments
 docker-compose --profile with-prometheus up -d
 ```
 
@@ -273,30 +589,109 @@ dcgm_power_usage{gpu!="0"} / 1000
 
 ## 🏗️ Architecture
 
+### System Overview
+
 ```
-┌─────────────────────────────────────┐
-│   Docker Container                  │
-│                                     │
-│  ┌──────────────┐  ┌─────────────┐ │
-│  │ nv-hostengine│  │  Exporter   │ │
-│  │   (DCGM)     │←─│   (Python)  │ │
-│  └──────┬───────┘  └──────┬──────┘ │
-│         │                 │        │
-│    Fake GPUs        HTTP :9400     │
-│    (Injected)        Metrics       │
-└─────────────────────────────────────┘
+╔════════════════════════════════════════════════════════════════════════════╗
+║                    DCGM Fake GPU Exporter - System Architecture            ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+                              ┌─────────────┐
+                              │   Users     │
+                              │  Operators  │
+                              └──────┬──────┘
+                                     │
+                        ┌────────────┴────────────┐
+                        │                         │
+                   ┌────▼────┐              ┌────▼────┐
+                   │ Grafana │              │ Custom  │
+                   │  :3000  │              │  Apps   │
+                   └────┬────┘              └────┬────┘
+                        │                         │
+                        │    ┌────────────┐       │
+                        └───▶│ Prometheus │◀──────┘
+                             │   :9090    │
+                             └─────┬──────┘
+                                   │ Scrape /metrics
+╔══════════════════════════════════▼═══════════════════════════════════════╗
+║                    DCGM Fake GPU Exporter Container                      ║
+║                                                                          ║
+║  ┌────────────────────────────────────────────────────────────────┐    ║
+║  │                      Exporter Layer                            │    ║
+║  │  ┌─────────────┐  ┌─────────────┐  ┌──────────────────────┐  │    ║
+║  │  │HTTP Server  │  │ UDS Server  │  │  Metrics Formatter   │  │    ║
+║  │  │  :9400      │  │  (optional) │  │  (Prometheus)        │  │    ║
+║  │  └──────┬──────┘  └──────┬──────┘  └──────────┬───────────┘  │    ║
+║  └─────────┼───────────────┼──────────────────────┼──────────────┘    ║
+║            └───────────────┴──────────────────────┘                    ║
+║  ┌─────────────────────────────────────────────────────────────────┐  ║
+║  │                   DCGM Manager Layer                            │  ║
+║  │  • Creates fake GPUs (1-16)                                     │  ║
+║  │  • Assigns metric profiles                                      │  ║
+║  │  • Updates metrics every 30s                                    │  ║
+║  └───────────────────────────┬─────────────────────────────────────┘  ║
+║                              │                                         ║
+║  ┌───────────────────────────▼─────────────────────────────────────┐  ║
+║  │              DCGM Core (nv-hostengine)                          │  ║
+║  │  • Manages GPU metrics database                                 │  ║
+║  │  • Provides DCGM API                                            │  ║
+║  └───────────────────────────┬─────────────────────────────────────┘  ║
+║                              │                                         ║
+║  ┌───────────────────────────▼─────────────────────────────────────┐  ║
+║  │         NVML Injection Layer (libnvml_injection.so)             │  ║
+║  │  • Intercepts NVML API calls                                    │  ║
+║  │  • Returns fake GPU data                                        │  ║
+║  └───────────────────────────┬─────────────────────────────────────┘  ║
+║                              │                                         ║
+║  ┌───────────────────────────▼─────────────────────────────────────┐  ║
+║  │                    Fake GPU Layer                               │  ║
+║  │  ╔═══╗  ╔═══╗  ╔═══╗  ╔═══╗  ╔═══╗  ╔═══╗  ╔═══╗  ╔═══╗        │  ║
+║  │  ║ 1 ║  ║ 2 ║  ║ 3 ║  ║ 4 ║  ║ 5 ║  ║ 6 ║  ║...║  ║16 ║        │  ║
+║  │  ╚═══╝  ╚═══╝  ╚═══╝  ╚═══╝  ╚═══╝  ╚═══╝  ╚═══╝  ╚═══╝        │  ║
+║  │                                                                  │  ║
+║  │  Profiles: static │ stable │ spike │ wave │ degrading │         │  ║
+║  │            faulty │ chaos                                       │  ║
+║  └──────────────────────────────────────────────────────────────────┘  ║
+╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
-**Components:**
+### Key Components
 
-1. **nv-hostengine**: DCGM daemon with NVML injection enabled
-2. **Fake GPUs**: Created via `dcgmCreateFakeEntities` API with injected attributes
-3. **Metric Injection**: Realistic GPU metrics injected every 30 seconds
-4. **Python Exporter**: Reads DCGM metrics via `dcgmi` CLI and exposes in Prometheus format
+1. **HTTP Server** (`dcgm_exporter.py`)
+   - Exposes metrics on port 9400
+   - `/metrics` endpoint (Prometheus format)
+   - `/health` endpoint (health check)
+
+2. **UDS Server** (`dcgm_uds_server.py`) - *Optional*
+   - Unix Domain Socket interface
+   - Lower latency than HTTP
+   - Enable with `ENABLE_UDS=true`
+
+3. **DCGM Manager** (`dcgm_fake_manager.py`)
+   - Creates and manages fake GPUs
+   - Injects GPU attributes and metrics
+   - Background updater thread (30s intervals)
+
+4. **DCGM Core** (`nv-hostengine`)
+   - NVIDIA's DCGM daemon
+   - Manages GPU metrics database
+   - Provides DCGM API on port 5555
+
+5. **NVML Injection** (`libnvml_injection.so`)
+   - Simulates NVIDIA GPU hardware
+   - No real GPU required
+   - Injected via `LD_PRELOAD`
+
+6. **Fake GPUs**
+   - Up to 16 GPUs per container
+   - Each with configurable behavior profile
+   - Realistic metric patterns
+
+📖 **[See detailed architecture documentation](docs/ARCHITECTURE.md)** for complete diagrams, data flow, deployment architecture, and technical details.
 
 ## 🔨 Building DCGM Binaries (Optional)
 
-> ⚠️ **Warning**: Building DCGM from source takes 20-28 hours and requires significant resources.
+> ⚠️ **Warning**: Building DCGM from source takes 10-15 hours and requires significant resources.
 
 If you want to build DCGM yourself:
 
@@ -305,7 +700,7 @@ If you want to build DCGM yourself:
 git clone https://github.com/NVIDIA/DCGM.git
 cd DCGM
 
-# Build (this will take ~20 hours)
+# Build (this will take ~10 hours)
 make -j$(nproc)
 
 # The binaries will be in:
@@ -316,7 +711,7 @@ Once built, set the path:
 
 ```bash
 export DCGM_DIR="$HOME/Workspace/DCGM/_out/Linux-amd64-debug"
-./build.sh
+./scripts/build.sh
 ```
 
 ## 🎯 Use Cases
@@ -329,7 +724,7 @@ export DCGM_DIR="$HOME/Workspace/DCGM/_out/Linux-amd64-debug"
 - **Cost Savings**: Avoid spinning up expensive GPU instances for development
 - **Alerting**: Test alert rules with different GPU behavior patterns
 - **Chaos Engineering**: Simulate GPU failures and degradation
-- **Load Testing**: Test monitoring systems with 100+ GPUs
+- **Load Testing**: Test monitoring systems with 100+ GPUs (using multiple containers)
 - **Dashboard Development**: Build and iterate on Grafana dashboards quickly
 
 ## 🚀 Migration to Production
@@ -433,13 +828,17 @@ docker run -p 9401:9400 -e EXPORTER_PORT=9400 dcgm-fake-gpu-exporter
 
 ### Running on ARM Mac (M1/M2/M3)
 
-The container uses x86-64 binaries. On ARM Macs, Docker will automatically use Rosetta 2 or QEMU:
+✅ **Works natively via Docker Desktop's Rosetta 2 emulation!** No special flags needed:
 
 ```bash
-# Specify platform explicitly
-docker build --platform linux/amd64 -t dcgm-fake-gpu-exporter .
-docker run --platform linux/amd64 -p 9400:9400 dcgm-fake-gpu-exporter
+# Same command as x86-64 - Docker handles emulation automatically
+docker run -d -p 9400:9400 \
+  -e NUM_FAKE_GPUS=4 \
+  -e METRIC_PROFILE=wave \
+  ghcr.io/saiakhil2012/dcgm-fake-gpu-exporter:latest
 ```
+
+Perfect for development and testing on Apple Silicon without needing a separate Linux VM.
 
 ## 🧪 Testing
 
@@ -447,6 +846,7 @@ docker run --platform linux/amd64 -p 9400:9400 dcgm-fake-gpu-exporter
 
 ```bash
 # Start container
+cd deployments
 docker-compose up -d
 
 # Wait for startup (15 seconds)
@@ -473,13 +873,19 @@ watch -n 5 'curl -s http://localhost:9400/metrics | grep dcgm_gpu_temp'
 docker run -d -p 9400:9400 -e METRIC_PROFILE=wave dcgm-fake-gpu-exporter
 
 # Test with 100 GPUs
+```bash
+# Test with 100 GPUs
 docker run -d -p 9400:9400 -e NUM_FAKE_GPUS=100 -e METRIC_PROFILE=stable dcgm-fake-gpu-exporter
+```
+
+**Note**: NUM_FAKE_GPUS values >16 will be automatically capped to 16. To test with more GPUs, run multiple containers with different `GPU_START_INDEX` values (see cluster simulation example above).
 ```
 
 ### With Prometheus
 
 ```bash
 # Start with Prometheus
+cd deployments
 docker-compose --profile with-prometheus up -d
 
 # Wait for startup
@@ -511,6 +917,7 @@ docker-compose -f docker-compose.profiles.yml up -d
 
 ## ⚠️ Limitations
 
+- **GPU Count**: Maximum 16 fake GPUs per container (DCGM limitation) - use multiple containers for more
 - **GPU Names/UUIDs**: Show as `<<<NULL>>>` due to DCGM fake entity limitations
 - **GPU 0**: Shows zeros (NVML injection artifact) - filter it out in queries
 - **Platform**: Linux x86-64 only (DCGM limitation)
@@ -523,30 +930,119 @@ docker-compose -f docker-compose.profiles.yml up -d
 .
 ├── README.md                        # This file
 ├── LICENSE                          # MIT License
-├── Dockerfile                       # Default Dockerfile (points to from-binaries)
-├── Dockerfile.from-binaries         # Build from DCGM binaries (initial setup)
-├── Dockerfile.from-image            # Build from existing image (dev machines)
-├── docker-compose.yml               # Compose configuration
-├── docker-compose-smart.yml         # Smart compose with auto-detection
-├── docker-entrypoint.sh             # Container entrypoint
-├── build.sh                         # Legacy build script (from binaries)
-├── build-smart.sh                   # Smart build script (auto-detects method)
-├── test-features.sh                 # Automated test suite
-├── dcgm_fake_manager.py             # Python manager for fake GPUs (with profiles)
-├── dcgm_exporter.py                 # Prometheus exporter
-├── prometheus.yml                   # Sample Prometheus config
-├── CHANGELOG.md                     # Version history
-├── IMPLEMENTATION.md                # Implementation details
-├── docs/
-│   ├── PROFILES.md                  # Detailed profile documentation
-│   └── BUILD_METHODS.md             # Build methods guide
-└── examples/
-    ├── docker-compose.profiles.yml  # Profile examples
-    ├── prometheus-profiles.yml      # Multi-instance Prometheus config
-    ├── docker-compose.otel.yml      # OpenTelemetry example
-    ├── grafana-dashboard.json       # Sample Grafana dashboard
-    └── otel-collector-config.yaml   # OTEL collector config
+├── CONTRIBUTING.md                  # Contribution guidelines
+├── SECURITY.md                      # Security policy
+├── Makefile                         # Convenience commands
+│
+├── src/                             # Source code
+│   ├── dcgm_exporter.py            # HTTP metrics exporter
+│   ├── dcgm_fake_manager.py        # Fake GPU manager
+│   ├── dcgm_uds_server.py          # Unix Domain Socket server
+│   └── docker-entrypoint.sh        # Container entrypoint
+│
+├── docker/                          # Dockerfiles
+│   ├── Dockerfile                  # Default (symlink to optimized)
+│   ├── Dockerfile.from-binaries-optimized  # Recommended build
+│   ├── Dockerfile.from-binaries    # Legacy from binaries
+│   ├── Dockerfile.from-image       # Build from existing image
+│   └── README.md                   # Dockerfile documentation
+│
+├── scripts/                         # Build scripts
+│   ├── build.sh                    # Unified build script (auto/optimized/from-binaries/from-image)
+│   └── README.md                   # Build documentation
+│
+├── tests/                           # Test scripts
+│   ├── test-uds.sh                 # UDS connectivity test
+│   ├── test-wave-updates.sh        # Wave profile test
+│   └── README.md                   # Testing documentation
+│
+├── deployments/                     # Docker Compose files
+│   ├── docker-compose.yml          # Basic deployment
+│   ├── docker-compose-demo.yml     # Full stack demo (Prometheus + Grafana)
+│   ├── prometheus.yml              # Prometheus config
+│   ├── examples/                   # Example configs
+│   ├── grafana/                    # Grafana provisioning
+│   └── README.md                   # Deployment guide
+│
+├── artifacts/                       # Binary artifacts (gitignored)
+│   ├── DCGM_subset.tar.gz          # DCGM binaries (not in git)
+│   ├── .gitkeep                    # Keep directory
+│   └── README.md                   # How to obtain artifacts
+│
+├── docs/                            # Documentation
+│   ├── ARCHITECTURE.md             # Architecture diagrams
+│   ├── QUICKSTART.md               # Quick start guide
+│   ├── DEPLOYMENT.md               # Deployment guide
+│   ├── BUILDING_DCGM.md            # DCGM build instructions
+│   ├── GITHUB_SETUP.md             # GitHub setup
+│   └── images/                     # Documentation images
+│
+├── grafana/                         # Grafana dashboards
+│   ├── dashboards/
+│   │   └── default-dashboard.json
+│   └── provisioning/
+│       ├── dashboards/
+│       └── datasources/
+│
+├── examples/                        # Example configurations
+│   ├── docker-compose.otel.yml     # OpenTelemetry setup
+│   ├── grafana-dashboard.json      # Sample dashboard
+│   ├── otel-collector-config.yaml  # OTEL config
+│   └── prometheus.yml              # Prometheus config
+│
+├── utility/                         # Utility scripts
+│   └── extract-dcgm.sh             # Extract DCGM from image
+│
+└── internal/                        # Internal docs (gitignored)
+    ├── ARCHITECTURE_DIAGRAMS.md    # All ASCII diagrams
+    ├── REPO_REORGANIZATION_PLAN.md # Reorganization plan
+    ├── PHASE1_COMPLETE.md          # Phase 1 summary
+    └── *.md                        # Work-in-progress docs
 ```
+
+**Directory Organization:**
+
+- **Root**: Only essential files (README, LICENSE, Makefile)
+- **`src/`**: All Python source code and entrypoint
+- **`docker/`**: All Dockerfile variants
+- **`scripts/`**: Build and utility scripts
+- **`tests/`**: Test scripts for validation
+- **`deployments/`**: Docker Compose configurations
+- **`artifacts/`**: Binary files (DCGM), gitignored
+- **`docs/`**: Public-facing documentation
+- **`grafana/`**: Grafana provisioning and dashboards
+- **`examples/`**: Example configurations
+- **`internal/`**: Work-in-progress docs, gitignored
+
+📖 **Each directory has its own README** with detailed information about contents and usage.
+
+---
+
+## 📚 Documentation
+
+Comprehensive guides for all aspects of the project:
+
+### Getting Started
+- **[Quick Start](docs/QUICKSTART.md)** - Get up and running in 5 minutes
+- **[Deployment Guide](docs/DEPLOYMENT.md)** - Production deployment strategies
+- **[Build Instructions](scripts/README.md)** - How to build from source
+
+### Architecture & Design
+- **[Architecture Overview](docs/ARCHITECTURE.md)** - System architecture, components, data flow
+- **[UDS Support](docs/UDS_SUPPORT.md)** - Unix Domain Socket integration
+- **[Source Code](src/README.md)** - Code structure and metric profiles
+
+### Advanced Topics
+- **[Building DCGM](docs/BUILDING_DCGM.md)** - Build DCGM from source (optional)
+- **[GitHub Setup](docs/GITHUB_SETUP.md)** - Repository and CI/CD setup
+- **[Contributing](CONTRIBUTING.md)** - How to contribute to this project
+
+### Reference
+- **[Dockerfile Variants](docker/README.md)** - All Dockerfile options explained
+- **[Testing Guide](tests/README.md)** - Test scripts and validation
+- **[Deployment Configurations](deployments/README.md)** - All docker-compose variants
+
+💡 **New to the project?** Start with [Quick Start](docs/QUICKSTART.md) → [Architecture](docs/ARCHITECTURE.md) → [Deployment Guide](docs/DEPLOYMENT.md)
 
 ## 🤝 Contributing
 
@@ -581,18 +1077,3 @@ See [LICENSE](LICENSE) file for details.
 ---
 
 **Note**: This is a development/testing tool. For production GPU monitoring with real hardware, use the official [NVIDIA DCGM Exporter](https://github.com/NVIDIA/dcgm-exporter).
-
-## 🗺️ Roadmap
-
-- [x] Configurable metric patterns (stable, spike, wave, degrading, faulty, chaos)
-- [x] Per-GPU profile configuration
-- [x] Scalable GPU counts (1-1000+)
-- [x] Environment-based configuration
-- [ ] Pre-built Docker images on Docker Hub
-- [ ] GitHub Actions CI/CD pipeline
-- [ ] Grafana dashboard templates for each profile
-- [ ] Additional metric fields (PCIe, NVLink)
-- [ ] Multi-architecture support (ARM64 via cross-compilation)
-- [ ] Helm chart for Kubernetes deployment
-- [ ] JSON policy files for complex scenarios
-- [ ] Time-based profile switching (simulate day/night cycles)

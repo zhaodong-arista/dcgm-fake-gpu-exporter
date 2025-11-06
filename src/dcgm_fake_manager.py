@@ -555,6 +555,14 @@ class DCGMFakeManager:
 
     def create_fake_gpus(self):
         """Create fake GPU entities."""
+        # DCGM has a hard limit on fake entities (typically 16-32)
+        MAX_FAKE_GPUS = 16
+        
+        if self.num_gpus > MAX_FAKE_GPUS:
+            log_warn(f"Requested {self.num_gpus} GPUs exceeds DCGM limit of {MAX_FAKE_GPUS}")
+            log_warn(f"Reducing to {MAX_FAKE_GPUS} GPUs")
+            self.num_gpus = MAX_FAKE_GPUS
+        
         log(f"Creating {self.num_gpus} fake GPUs...")
 
         # Add DCGM Python modules to path
@@ -760,16 +768,21 @@ class DCGMFakeManager:
             interval = self.update_interval
 
         def update_loop():
+            log_info(f"Metric updater thread started (interval: {interval}s)")
             while True:
                 try:
                     time.sleep(interval)
-                    log_info("Updating metrics...")
+                    log_info(f"[Update #{self.profiles[1].iteration}] Updating metrics...")
                     self.inject_metrics()
+                    log_info(f"[Update #{self.profiles[1].iteration}] Metrics updated successfully")
                 except Exception as e:
                     log_error(f"Metric updater error: {e}")
+                    import traceback
+                    traceback.print_exc()
 
-        thread = threading.Thread(target=update_loop, daemon=True)
-        thread.start()
+        # Don't use daemon=True so the thread keeps the process alive
+        self.updater_thread = threading.Thread(target=update_loop, daemon=False)
+        self.updater_thread.start()
         log(f"✓ Started metric updater (updates every {interval}s)")
 
     def create_wrapper(self):

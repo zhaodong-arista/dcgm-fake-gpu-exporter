@@ -1,0 +1,93 @@
+groups:
+  - name: gpu_alerts
+    interval: 10s
+    rules:
+      # High Temperature Alert
+      - alert: GPUHighTemperature
+        expr: dcgm_gpu_temp{gpu!="0"} > 75
+        for: 30s
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "GPU {{ $labels.gpu }} temperature is high"
+          description: "GPU {{ $labels.gpu }} ({{ $labels.device }}) temperature is {{ $value }}°C (threshold: 75°C)"
+      
+      # Critical Temperature Alert
+      - alert: GPUCriticalTemperature
+        expr: dcgm_gpu_temp{gpu!="0"} > 85
+        for: 15s
+        labels:
+          severity: critical
+          component: gpu
+        annotations:
+          summary: "GPU {{ $labels.gpu }} temperature is CRITICAL"
+          description: "GPU {{ $labels.gpu }} ({{ $labels.device }}) temperature is {{ $value }}°C (threshold: 85°C) - immediate action required!"
+      
+      # High Utilization Alert (for spike detection)
+      - alert: GPUHighUtilization
+        expr: dcgm_gpu_utilization{gpu!="0"} > 90
+        for: 1m
+        labels:
+          severity: info
+          component: gpu
+        annotations:
+          summary: "GPU {{ $labels.gpu }} utilization is very high"
+          description: "GPU {{ $labels.gpu }} ({{ $labels.device }}) is at {{ $value }}% utilization"
+      
+      # Sudden Spike Detection
+      - alert: GPUUtilizationSpike
+        expr: delta(dcgm_gpu_utilization{gpu!="0"}[1m]) > 40
+        for: 10s
+        labels:
+          severity: warning
+          component: gpu
+          pattern: spike
+        annotations:
+          summary: "GPU {{ $labels.gpu }} experienced sudden spike"
+          description: "GPU {{ $labels.gpu }} utilization changed by >40% in 1 minute - possible spike pattern detected"
+      
+      # High Power Usage
+      - alert: GPUHighPower
+        expr: dcgm_power_usage{gpu!="0"} > 280
+        for: 2m
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "GPU {{ $labels.gpu }} power usage is high"
+          description: "GPU {{ $labels.gpu }} is consuming {{ $value }}W (threshold: 280W)"
+      
+      # Degrading Performance Detection
+      - alert: GPUDegradingPerformance
+        expr: deriv(dcgm_gpu_utilization{gpu!="0"}[5m]) < -2
+        for: 2m
+        labels:
+          severity: warning
+          component: gpu
+          pattern: degrading
+        annotations:
+          summary: "GPU {{ $labels.gpu }} performance is degrading"
+          description: "GPU {{ $labels.gpu }} shows declining utilization trend - possible degradation pattern"
+      
+      # Memory Pressure
+      - alert: GPUHighMemoryUsage
+        expr: (dcgm_fb_used{gpu!="0"} / dcgm_fb_total{gpu!="0"}) * 100 > 90
+        for: 1m
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "GPU {{ $labels.gpu }} memory usage is high"
+          description: "GPU {{ $labels.gpu }} memory usage is {{ $value }}%"
+      
+      # Multiple GPUs Down (Faulty pattern)
+      - alert: MultipleGPUsHighTemp
+        expr: count(dcgm_gpu_temp{gpu!="0"} > 80) > 2
+        for: 1m
+        labels:
+          severity: critical
+          component: cluster
+        annotations:
+          summary: "Multiple GPUs experiencing high temperature"
+          description: "{{ $value }} GPUs have temperature above 80°C - check cooling system"

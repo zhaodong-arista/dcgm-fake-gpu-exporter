@@ -24,9 +24,10 @@ Thank you for your interest in contributing! This document provides guidelines f
 
 ```bash
 # Build the Docker image
-./build-smart.sh
+./scripts/build-smart.sh
 
 # Test your changes
+cd deployments
 docker-compose up -d
 curl http://localhost:9400/metrics
 
@@ -50,11 +51,12 @@ Before submitting a PR, ensure:
 
 1. **Docker image builds successfully**
    ```bash
-   ./build-smart.sh
+   ./scripts/build-smart.sh
    ```
 
 2. **Container starts and runs**
    ```bash
+   cd deployments
    docker-compose up -d
    sleep 15
    docker ps | grep dcgm-exporter
@@ -149,7 +151,7 @@ Before submitting a PR, ensure:
 If you don't have DCGM binaries:
 ```bash
 # Use the from-image build method
-./build-smart.sh --from-image
+./scripts/build-smart.sh --from-image
 ```
 
 ### Testing on ARM Macs (M1/M2/M3)
@@ -177,7 +179,7 @@ ls -la /root/Workspace/DCGM/_out/Linux-amd64-debug/bin/
 
 ### Adding New Metric Profiles
 
-1. Edit `dcgm_fake_manager.py`
+1. Edit `src/dcgm_fake_manager.py`
 2. Add profile to `METRIC_PROFILES` dict
 3. Update `README.md` with profile documentation
 4. Test with various GPU counts

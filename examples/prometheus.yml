@@ -1,14 +1,16 @@
 # Prometheus configuration for DCGM Fake GPU Exporter
 
 global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
+  scrape_interval: 5s
+  evaluation_interval: 10s
+
+# Load alert rules
+rule_files:
+  - '/etc/prometheus/alerts/*.yml'
 
 scrape_configs:
-  - job_name: 'dcgm-fake-gpus'
+  - job_name: 'dcgm'
     static_configs:
       - targets: ['dcgm-exporter:9400']
-    scrape_interval: 10s
+    scrape_interval: 5s
     scrape_timeout: 5s
-    
-  # Add your other scrape configs here

@@ -2,11 +2,21 @@
 DCGM/
 dcgm/
 dcgm_optimized/
-DCGM_subset.tar.gz
 Workspace/
 bin/
 lib/
 share/
+
+# Artifacts (large binary files)
+artifacts/*.tar.gz
+artifacts/*.tar
+artifacts/DCGM/
+# Keep directory structure
+!artifacts/.gitkeep
+!artifacts/README.md
+
+# Internal documentation (not for public)
+internal/
 
 # Python
 __pycache__/

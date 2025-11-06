@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  # DCGM Fake GPU Exporter - Full Featured Demo
+  dcgm-exporter:
+    image: dcgm-fake-gpu-exporter:latest
+    container_name: dcgm-exporter-demo
+    ports:
+      - "9400:9400"  # HTTP metrics endpoint
+    volumes:
+      - dcgm_sockets:/var/run/dcgm  # UDS socket directory
+    environment:
+      - NUM_FAKE_GPUS=4
+      - GPU_PROFILES=wave,spike,stable,degrading  # Different profile per GPU
+      - METRIC_UPDATE_INTERVAL=5  # Fast updates for demo
+      - ENABLE_UDS=true  # 🔥 Enable Unix Domain Socket
+    restart: unless-stopped
+
+  # Prometheus - Scrapes HTTP endpoint
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus-demo
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../examples/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../grafana/provisioning/alerts:/etc/prometheus/alerts:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+
+  # UDS Consumer Demo - Python client using Unix Domain Socket
+  uds-consumer:
+    image: python:3.11-slim
+    container_name: uds-consumer-demo
+    volumes:
+      - dcgm_sockets:/var/run/dcgm:ro  # Read-only access to socket
+      - ./examples/uds-consumer-demo.sh:/app/uds-consumer-demo.sh:ro
+    working_dir: /app
+    command: bash /app/uds-consumer-demo.sh
+    restart: unless-stopped
+    depends_on:
+      - dcgm-exporter
+
+  # Grafana - Visualizes data from Prometheus
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-demo
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/dcgm-gpu-overview.json
+      - GF_UNIFIED_ALERTING_ENABLED=true
+      - GF_ALERTING_ENABLED=false  # Disable legacy alerting
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  dcgm_sockets:  # Shared volume for Unix Domain Socket
