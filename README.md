@@ -8,29 +8,6 @@ A powerful Prometheus exporter that simulates realistic NVIDIA GPU behavior usin
 
 ---
 
-## 📋 Table of Contents
-
-- [Why This Tool?](#-why-this-tool)
-- [Features](#-features)
-- [High-Level Architecture](#️-high-level-architecture)
-- [Quick Start](#-quick-start)
-- **[Consuming the Exporter](#-consuming-the-exporter-main-use-case)** ⭐ **Main Use Case**
-  - [HTTP/REST API](#-option-1-httprest-api-default---recommended)
-  - [Unix Domain Socket](#-option-2-unix-domain-socket-optional---low-latency)
-- [Building from Source](#️-building-from-source-for-contributors)
-- [Configuration](#-configuration)
-- [Available Metrics](#-available-metrics)
-- [Integration Examples](#-integration-examples)
-- [Architecture Details](#️-architecture)
-- [Migration to Production](#-migration-to-production)
-- [Troubleshooting](#-troubleshooting)
-- [Testing](#-testing)
-- [Repository Structure](#-repository-structure)
-- [Documentation](#-documentation)
-- [Contributing](#-contributing)
-
----
-
 ## 🎯 Why This Tool?
 
 - **💰 Save Costs**: No need for expensive GPU instances during development
@@ -55,7 +32,7 @@ A powerful Prometheus exporter that simulates realistic NVIDIA GPU behavior usin
 
 ## 🏗️ High-Level Architecture
 
-<img src="docs/images/dcgm-fake-gpu-exporter-architecture.png" alt="DCGM Fake GPU Exporter Architecture" style="width: 85%; height: auto;"/>
+<img src="docs/images/dcgm-fake-gpu-exporter-architecture.png" alt="DCGM Fake GPU Exporter Architecture" style="width: 75%; height: auto;"/>
 
 **Two Ways to Consume Metrics:**
 - 🌐 **HTTP (Default)**: Standard Prometheus scraping on port 9400
