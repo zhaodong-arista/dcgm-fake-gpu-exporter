@@ -106,6 +106,10 @@ A powerful Prometheus exporter that simulates realistic NVIDIA GPU behavior usin
 
 **See the profiles in action with Grafana!**
 
+![DCGM Multi-Profile Dashboard](docs/images/dcgm-fake-gpu-exporter-grafana-dashboard.png)
+
+*Live multi-profile dashboard showing 4 GPUs with different behavior profiles: wave, spike, stable, and degrading*
+
 ```bash
 # Start full stack: DCGM Exporter + Prometheus + Grafana
 cd deployments

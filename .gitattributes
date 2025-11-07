@@ -1,0 +1,20 @@
+# GitHub Linguist overrides
+# Mark test scripts as vendored so they don't count in language stats
+tests/*.sh linguist-vendored
+
+# Mark example/demo scripts as documentation
+examples/*.sh linguist-documentation
+deployments/examples/*.sh linguist-documentation
+
+# Mark internal documentation scripts as documentation
+internal/*.sh linguist-documentation
+
+# Ensure Python is recognized as the primary language
+*.py linguist-detectable=true
+*.sh linguist-detectable=true
+
+# Exclude certain patterns from language detection
+*.md linguist-documentation
+*.json linguist-vendored
+*.yml linguist-vendored
+*.yaml linguist-vendored
