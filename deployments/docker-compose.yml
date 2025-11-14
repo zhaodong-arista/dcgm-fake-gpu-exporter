@@ -3,7 +3,7 @@ version: '3.8'
 services:
   dcgm-exporter:
     build: .
-    image: dcgm-fake-gpu-exporter:latest
+    image: ghcr.io/saiakhil2012/dcgm-fake-gpu-exporter:latest
     container_name: dcgm-exporter
     ports:
       - "9400:9400"  # Prometheus metrics

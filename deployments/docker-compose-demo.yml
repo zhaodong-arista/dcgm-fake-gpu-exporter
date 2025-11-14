@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # DCGM Fake GPU Exporter - Full Featured Demo
   dcgm-exporter:
-    image: dcgm-fake-gpu-exporter:latest
+    image: ghcr.io/saiakhil2012/dcgm-fake-gpu-exporter:latest
     container_name: dcgm-exporter-demo
     ports:
       - "9400:9400"  # HTTP metrics endpoint
