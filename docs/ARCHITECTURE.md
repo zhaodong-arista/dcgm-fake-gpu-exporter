@@ -290,9 +290,11 @@ NVML_INJECTION_MODE=1
 │     └─▶ Extract GPU metrics from table format                           │
 │                                                                          │
 │  4. Format as Prometheus metrics                                        │
-│     └─▶ # HELP dcgm_gpu_temp GPU temperature                            │
-│         # TYPE dcgm_gpu_temp gauge                                      │
-│         dcgm_gpu_temp{gpu="1",device="nvidia1"} 50.0                    │
+│     └─▶ # HELP DCGM_FI_DEV_GPU_TEMP GPU temperature                    │
+│         # TYPE DCGM_FI_DEV_GPU_TEMP gauge                               │
+│         DCGM_FI_DEV_GPU_TEMP{gpu="1",device="nvidia1",Hostname="...",   │
+│                              UUID="...",modelName="Tesla V100",         │
+│                              pci_bus_id="00000000:01:00.0"} 50.0        │
 │         dcgm_gpu_temp{gpu="2",device="nvidia2"} 56.0                    │
 │         ...                                                              │
 │                                                                          │

@@ -1,30 +1,85 @@
 #!/usr/bin/env python3
 """DCGM OpenTelemetry/Prometheus Exporter using dcgmi CLI"""
-import os, sys, time, subprocess, re
+import os, sys, time, subprocess, re, socket
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread, Lock
 
 metrics_cache = ""
 metrics_lock = Lock()
+gpu_info_cache = {}
+gpu_info_lock = Lock()
 DCGMI_PATH = "/usr/local/dcgm/share/dcgm_tests/apps/amd64/dcgmi"
+HOSTNAME = socket.gethostname()
 
-# Map DCGM field IDs to metric names
+# Map DCGM field IDs to metric names (matching official DCGM field names)
+# Reference: https://docs.nvidia.com/datacenter/dcgm/latest/dcgm-api/dcgm-api-field-ids.html
 FIELD_MAPPING = {
-    '150': ('dcgm_gpu_temp', 'GPU temperature in Celsius'),
-    '155': ('dcgm_power_usage', 'Power usage in watts'),
-    '203': ('dcgm_gpu_utilization', 'GPU utilization percentage'),
-    '204': ('dcgm_mem_copy_utilization', 'Memory utilization percentage'),
-    '210': ('dcgm_sm_clock', 'SM clock in MHz'),
-    '211': ('dcgm_mem_clock', 'Memory clock in MHz'),
-    '251': ('dcgm_fb_total', 'Total framebuffer in MB'),
-    '252': ('dcgm_fb_used', 'Used framebuffer in MB'),
-    '253': ('dcgm_fb_free', 'Free framebuffer in MB'),
+    '150': ('DCGM_FI_DEV_GPU_TEMP', 'GPU temperature in Celsius'),
+    '155': ('DCGM_FI_DEV_POWER_USAGE', 'Power usage in watts'),
+    '203': ('DCGM_FI_DEV_GPU_UTIL', 'GPU utilization percentage'),
+    '204': ('DCGM_FI_DEV_MEM_COPY_UTIL', 'Memory utilization percentage'),
+    '100': ('DCGM_FI_DEV_SM_CLOCK', 'SM clock in MHz'),
+    '101': ('DCGM_FI_DEV_MEM_CLOCK', 'Memory clock in MHz'),
+    '250': ('DCGM_FI_DEV_FB_TOTAL', 'Total framebuffer in MB'),
+    '251': ('DCGM_FI_DEV_FB_FREE', 'Free framebuffer in MB'),
+    '252': ('DCGM_FI_DEV_FB_USED', 'Used framebuffer in MB'),
 }
+
+
+def get_gpu_info():
+    """Get GPU information (model names, UUID, PCI) from dcgmi discovery command."""
+    gpu_info = {}
+    try:
+        result = subprocess.run([DCGMI_PATH, 'discovery', '-l'],
+                                capture_output=True,
+                                text=True,
+                                timeout=5,
+                                env=os.environ.copy())
+        if result.returncode == 0:
+            # Parse output to extract GPU ID, model name, and UUID
+            # Example output formats:
+            # 1 GPU 1: Tesla V100-SXM2-16GB (UUID: GPU-00000001-fake-dcgm-0001-000400000001)
+            # OR (if UUID not available):
+            # 1 GPU 1: <<<NULL>>> (UUID: <<<NULL>>>)
+            lines = result.stdout.strip().split('\n')
+            for line in lines:
+                # Try to match lines with UUID
+                match = re.match(
+                    r'^\d+\s+GPU\s+(\d+):\s+([^(]+)\(UUID:\s+([^)]+)\)', line)
+                if match:
+                    gpu_id = match.group(1)
+                    model_name = match.group(2).strip()
+                    uuid = match.group(3).strip()
+
+                    # Skip GPU 0
+                    if gpu_id == '0':
+                        continue
+
+                    # Calculate PCI bus ID based on GPU index
+                    gpu_idx = int(gpu_id)
+                    pci_bus_id = f"00000000:{gpu_idx:02x}:00.0"
+
+                    # Handle <<<NULL>>> values from DCGM fake entities
+                    if model_name == '<<<NULL>>>' or not model_name:
+                        model_name = 'Unknown'
+                    if uuid == '<<<NULL>>>' or not uuid:
+                        # Generate a fake UUID if not available
+                        uuid = f"GPU-{gpu_idx:08x}-fake-dcgm-{gpu_idx:04x}-0000{gpu_idx:08x}"
+
+                    gpu_info[gpu_id] = {
+                        'modelName': model_name,
+                        'UUID': uuid,
+                        'pci_bus_id': pci_bus_id
+                    }
+    except Exception as e:
+        print(f"Warning: Could not get GPU info: {e}", flush=True)
+    return gpu_info
+
 
 def parse_dcgmi_output(output):
     metrics = {}
     lines = output.strip().split('\n')
-    for i, line in enumerate(lines):
+    for line in lines:
         if line.startswith('GPU '):
             parts = line.split()
             if len(parts) >= 2:
@@ -45,23 +100,36 @@ def parse_dcgmi_output(output):
                                 pass
     return metrics
 
+
 def collect_metrics():
     try:
+        # Get GPU info - use cached version
+        with gpu_info_lock:
+            gpu_info = gpu_info_cache.copy()
+
         field_ids = ','.join(FIELD_MAPPING.keys())
         result = subprocess.run(
             [DCGMI_PATH, 'dmon', '-e', field_ids, '-c', '1'],
             capture_output=True,
             text=True,
             timeout=5,
-            env=os.environ.copy()
-        )
+            env=os.environ.copy())
         if result.returncode != 0:
             print(f"dcgmi error: {result.stderr}", flush=True)
             return "# Error: dcgmi command failed\n"
         gpu_metrics = parse_dcgmi_output(result.stdout)
         lines = []
         for gpu_id, fields in gpu_metrics.items():
-            labels = f'gpu="{gpu_id}",device="nvidia{gpu_id}"'
+            # Get GPU info for this GPU
+            info = gpu_info.get(gpu_id, {})
+            model_name = info.get('modelName', 'Unknown')
+            uuid = info.get('UUID', 'Unknown')
+            pci_bus_id = info.get('pci_bus_id', 'Unknown')
+
+            # Build labels matching real DCGM exporter format
+            # Note: Using consistent label names with real DCGM metrics
+            labels = f'gpu="{gpu_id}",device="nvidia{gpu_id}",Hostname="{HOSTNAME}",UUID="{uuid}",modelName="{model_name}",pci_bus_id="{pci_bus_id}"'
+
             for field_id, value in fields.items():
                 if field_id in FIELD_MAPPING:
                     metric_name, _ = FIELD_MAPPING[field_id]
@@ -81,6 +149,7 @@ def collect_metrics():
         traceback.print_exc()
         return "# Error: collection failed\n"
 
+
 def update_metrics_cache():
     global metrics_cache
     while True:
@@ -91,7 +160,9 @@ def update_metrics_cache():
             print(f"Cache update error: {e}", flush=True)
         time.sleep(5)
 
+
 class MetricsHandler(BaseHTTPRequestHandler):
+
     def do_GET(self):
         if self.path == '/metrics':
             with metrics_lock:
@@ -107,16 +178,38 @@ class MetricsHandler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
-    def log_message(self, *args): pass
+
+    def log_message(self, *args):
+        pass
+
 
 if __name__ == '__main__':
     sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)
     sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', buffering=1)
     print("DCGM OpenTelemetry Exporter (CLI-based)", flush=True)
+    print(f"Hostname: {HOSTNAME}", flush=True)
     if not os.path.exists(DCGMI_PATH):
         print(f"✗ dcgmi not found at {DCGMI_PATH}", flush=True)
         sys.exit(1)
     print(f"✓ Using dcgmi at {DCGMI_PATH}", flush=True)
+
+    # Get GPU information (model names, UUID, PCI) at startup
+    print("Fetching GPU information...", flush=True)
+    with gpu_info_lock:
+        gpu_info_cache.update(get_gpu_info())
+    if gpu_info_cache:
+        print(f"✓ Found {len(gpu_info_cache)} GPUs:", flush=True)
+        for gpu_id, info in gpu_info_cache.items():
+            model = info.get('modelName', 'Unknown')
+            uuid = info.get('UUID', 'Unknown')
+            pci = info.get('pci_bus_id', 'Unknown')
+            print(f"  GPU {gpu_id}: {model}", flush=True)
+            print(f"    UUID: {uuid}", flush=True)
+            print(f"    PCI:  {pci}", flush=True)
+    else:
+        print("⚠ No GPU info found (will use 'Unknown' for labels)",
+              flush=True)
+
     print("Testing dcgmi...", flush=True)
     try:
         test_result = collect_metrics()

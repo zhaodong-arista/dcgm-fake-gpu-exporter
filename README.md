@@ -150,13 +150,13 @@ for line in metrics.split('\n'):
 
 ```promql
 # Query GPU temperatures
-dcgm_gpu_temp{gpu!="0"}
+DCGM_FI_DEV_GPU_TEMP{gpu!="0"}
 
 # GPU utilization
-dcgm_gpu_utilization{gpu!="0"}
+DCGM_FI_DEV_GPU_UTIL{gpu!="0"}
 
-# Power usage (convert mW to W)
-dcgm_power_usage{gpu!="0"} / 1000
+# Power usage
+DCGM_FI_DEV_POWER_USAGE{gpu!="0"}
 ```
 
 ---
@@ -314,17 +314,37 @@ curl http://localhost:9400/metrics
 
 ## 📊 Available Metrics
 
-| Metric | Description | Unit |
-|--------|-------------|------|
-| `dcgm_gpu_temp` | GPU temperature | Celsius |
-| `dcgm_power_usage` | Power consumption | Watts |
-| `dcgm_gpu_utilization` | GPU utilization | percentage |
-| `dcgm_mem_copy_utilization` | Memory utilization | percentage |
-| `dcgm_sm_clock` | SM clock speed | MHz |
-| `dcgm_mem_clock` | Memory clock speed | MHz |
-| `dcgm_fb_total` | Total framebuffer | MB |
-| `dcgm_fb_used` | Used framebuffer | MB |
-| `dcgm_fb_free` | Free framebuffer | MB |
+All metric names match the official DCGM field names from [NVIDIA DCGM API documentation](https://docs.nvidia.com/datacenter/dcgm/latest/dcgm-api/dcgm-api-field-ids.html).
+
+| Metric | Field ID | Description | Unit |
+|--------|----------|-------------|------|
+| `DCGM_FI_DEV_GPU_TEMP` | 150 | GPU temperature | Celsius |
+| `DCGM_FI_DEV_POWER_USAGE` | 155 | Power consumption | Watts |
+| `DCGM_FI_DEV_GPU_UTIL` | 203 | GPU utilization | percentage |
+| `DCGM_FI_DEV_MEM_COPY_UTIL` | 204 | Memory utilization | percentage |
+| `DCGM_FI_DEV_SM_CLOCK` | 100 | SM clock speed | MHz |
+| `DCGM_FI_DEV_MEM_CLOCK` | 101 | Memory clock speed | MHz |
+| `DCGM_FI_DEV_FB_TOTAL` | 250 | Total framebuffer | MB |
+| `DCGM_FI_DEV_FB_FREE` | 251 | Free framebuffer | MB |
+| `DCGM_FI_DEV_FB_USED` | 252 | Used framebuffer | MB |
+
+### Metric Labels
+
+All metrics include the following labels (matching real DCGM exporter format):
+
+| Label | Description | Example |
+|-------|-------------|---------|
+| `gpu` | GPU ID | `"1"`, `"2"`, `"3"` |
+| `device` | Device name | `"nvidia1"`, `"nvidia2"` |
+| `Hostname` | Container/host hostname | `"dcgm-fake-gpu-exporter"` |
+| `UUID` | GPU UUID | `"GPU-00000001-fake-dcgm-0001-000400000001"` |
+| `modelName` | GPU model name | `"Tesla V100-SXM2-16GB"`, `"A100-SXM4-40GB"` |
+| `pci_bus_id` | PCI bus ID | `"00000000:01:00.0"`, `"00000000:02:00.0"` |
+
+**Example metric output:**
+```
+DCGM_FI_DEV_GPU_TEMP{gpu="1",device="nvidia1",Hostname="dcgm-exporter",UUID="GPU-00000001-fake-dcgm-0001-000400000001",modelName="Tesla V100-SXM2-16GB",pci_bus_id="00000000:01:00.0"} 55.0
+```
 
 ## 🔧 Configuration
 
@@ -763,7 +783,7 @@ This is expected behavior. GPU 0 is an artifact of NVML injection and can be fil
 
 ```promql
 # In Prometheus queries
-dcgm_gpu_temp{gpu!="0"}
+DCGM_FI_DEV_GPU_TEMP{gpu!="0"}
 ```
 
 ### Port already in use
@@ -800,13 +820,13 @@ docker-compose up -d
 sleep 15
 
 # Check metrics
-curl -s http://localhost:9400/metrics | grep dcgm_gpu_temp
+curl -s http://localhost:9400/metrics | grep DCGM_FI_DEV_GPU_TEMP
 
 # Should see output like:
-# dcgm_gpu_temp{gpu="1",device="nvidia1"} 51
-# dcgm_gpu_temp{gpu="2",device="nvidia2"} 58
-# dcgm_gpu_temp{gpu="3",device="nvidia3"} 65
-# dcgm_gpu_temp{gpu="4",device="nvidia4"} 73
+# DCGM_FI_DEV_GPU_TEMP{gpu="1",device="nvidia1",Hostname="...",UUID="...",modelName="Tesla V100-SXM2-16GB",pci_bus_id="00000000:01:00.0"} 51
+# DCGM_FI_DEV_GPU_TEMP{gpu="2",device="nvidia2",Hostname="...",UUID="...",modelName="Tesla V100-SXM2-32GB",pci_bus_id="00000000:02:00.0"} 58
+# DCGM_FI_DEV_GPU_TEMP{gpu="3",device="nvidia3",Hostname="...",UUID="...",modelName="A100-SXM4-40GB",pci_bus_id="00000000:03:00.0"} 65
+# DCGM_FI_DEV_GPU_TEMP{gpu="4",device="nvidia4",Hostname="...",UUID="...",modelName="A100-SXM4-80GB",pci_bus_id="00000000:04:00.0"} 73
 ```
 
 ### Testing Different Profiles
