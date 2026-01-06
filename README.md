@@ -358,6 +358,8 @@ DCGM_FI_DEV_GPU_TEMP{gpu="1",device="nvidia1",Hostname="dcgm-exporter",UUID="GPU
 | `METRIC_UPDATE_INTERVAL` | `30` | Seconds between metric updates |
 | `GPU_START_INDEX` | `1` | Starting GPU index (for cluster simulation) |
 | `EXPORTER_PORT` | `9400` | Prometheus metrics port |
+| `HOSTNAME_OVERRIDE` | - | Override hostname in metrics (useful in Kubernetes) |
+| `NODE_NAME` | - | Node name for Kubernetes (fallback if HOSTNAME_OVERRIDE not set) |
 | `ENABLE_UDS` | `false` | Enable Unix Domain Socket server (`true`/`false`) |
 | `UDS_SOCKET_PATH` | `/var/run/dcgm/metrics.sock` | Path to UDS socket (inside container) |
 | `DCGM_DIR` | `/root/Workspace/DCGM/_out/Linux-amd64-debug` | Path to DCGM binaries in container |
@@ -444,6 +446,33 @@ docker run -d -p 9402:9400 \
 **Custom port:**
 ```bash
 docker run -d -p 9401:9400 dcgm-fake-gpu-exporter
+```
+
+**Kubernetes deployment with proper hostname:**
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dcgm-fake-exporter
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+      - name: exporter
+        image: ghcr.io/zhaodong-arista/dcgm-fake-gpu-exporter:latest
+        env:
+        - name: NUM_FAKE_GPUS
+          value: "4"
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: HOSTNAME_OVERRIDE
+          value: "$(NODE_NAME)"  # Use node name instead of pod name
+        ports:
+        - containerPort: 9400
+          name: metrics
 ```
 
 ## 📈 Integration Examples

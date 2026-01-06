@@ -9,7 +9,9 @@ metrics_lock = Lock()
 gpu_info_cache = {}
 gpu_info_lock = Lock()
 DCGMI_PATH = "/usr/local/dcgm/share/dcgm_tests/apps/amd64/dcgmi"
-HOSTNAME = socket.gethostname()
+
+# Get hostname - prefer environment variable for Kubernetes compatibility
+HOSTNAME = os.environ.get('NODE_NAME', socket.gethostname())
 
 # Map DCGM field IDs to metric names (matching official DCGM field names)
 # Reference: https://docs.nvidia.com/datacenter/dcgm/latest/dcgm-api/dcgm-api-field-ids.html
@@ -29,7 +31,15 @@ FIELD_MAPPING = {
 def get_gpu_info():
     """Get GPU information (model names, UUID, PCI) from dcgmi discovery command."""
     gpu_info = {}
+
+    # GPU models that dcgm_fake_manager.py injects (in order)
+    gpu_models = [
+        "Tesla V100-SXM2-16GB", "Tesla V100-SXM2-32GB", "A100-SXM4-40GB",
+        "A100-SXM4-80GB", "H100-SXM5-80GB", "A100-PCIE-40GB"
+    ]
+
     try:
+        # First, try to get GPU info from dcgmi discovery
         result = subprocess.run([DCGMI_PATH, 'discovery', '-l'],
                                 capture_output=True,
                                 text=True,
@@ -55,24 +65,77 @@ def get_gpu_info():
                     if gpu_id == '0':
                         continue
 
-                    # Calculate PCI bus ID based on GPU index
                     gpu_idx = int(gpu_id)
+
+                    # Calculate PCI bus ID based on GPU index (matches dcgm_fake_manager.py)
                     pci_bus_id = f"00000000:{gpu_idx:02x}:00.0"
 
                     # Handle <<<NULL>>> values from DCGM fake entities
+                    # Use the same model names that dcgm_fake_manager.py injects
                     if model_name == '<<<NULL>>>' or not model_name:
-                        model_name = 'Unknown'
+                        model_name = gpu_models[(gpu_idx - 1) %
+                                                len(gpu_models)]
+
                     if uuid == '<<<NULL>>>' or not uuid:
-                        # Generate a fake UUID if not available
-                        uuid = f"GPU-{gpu_idx:08x}-fake-dcgm-{gpu_idx:04x}-0000{gpu_idx:08x}"
+                        # Generate UUID matching dcgm_fake_manager.py format
+                        num_gpus = int(os.environ.get('NUM_FAKE_GPUS', '4'))
+                        uuid = f"GPU-{gpu_idx:08x}-fake-dcgm-{gpu_idx:04x}-{num_gpus:04x}{gpu_idx:08x}"
 
                     gpu_info[gpu_id] = {
                         'modelName': model_name,
                         'UUID': uuid,
                         'pci_bus_id': pci_bus_id
                     }
+
+        # If no GPUs found via discovery, generate default info for expected GPUs
+        if not gpu_info:
+            print(
+                "Warning: dcgmi discovery returned no GPUs, generating default info",
+                flush=True)
+            num_gpus = int(os.environ.get('NUM_FAKE_GPUS', '4'))
+            gpu_start_index = int(os.environ.get('GPU_START_INDEX', '1'))
+
+            for i in range(num_gpus):
+                gpu_idx = gpu_start_index + i
+                gpu_id = str(gpu_idx)
+
+                # Skip GPU 0
+                if gpu_id == '0':
+                    continue
+
+                model_name = gpu_models[i % len(gpu_models)]
+                pci_bus_id = f"00000000:{gpu_idx:02x}:00.0"
+                uuid = f"GPU-{gpu_idx:08x}-fake-dcgm-{gpu_idx:04x}-{num_gpus:04x}{gpu_idx:08x}"
+
+                gpu_info[gpu_id] = {
+                    'modelName': model_name,
+                    'UUID': uuid,
+                    'pci_bus_id': pci_bus_id
+                }
+
     except Exception as e:
         print(f"Warning: Could not get GPU info: {e}", flush=True)
+        # Generate default info as fallback
+        num_gpus = int(os.environ.get('NUM_FAKE_GPUS', '4'))
+        gpu_start_index = int(os.environ.get('GPU_START_INDEX', '1'))
+
+        for i in range(num_gpus):
+            gpu_idx = gpu_start_index + i
+            gpu_id = str(gpu_idx)
+
+            if gpu_id == '0':
+                continue
+
+            model_name = gpu_models[i % len(gpu_models)]
+            pci_bus_id = f"00000000:{gpu_idx:02x}:00.0"
+            uuid = f"GPU-{gpu_idx:08x}-fake-dcgm-{gpu_idx:04x}-{num_gpus:04x}{gpu_idx:08x}"
+
+            gpu_info[gpu_id] = {
+                'modelName': model_name,
+                'UUID': uuid,
+                'pci_bus_id': pci_bus_id
+            }
+
     return gpu_info
 
 
